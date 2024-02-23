@@ -7,9 +7,11 @@ import type {
   ApiConfig,
   AuthConfig,
   ConfigProvider,
+  CoreModuleConfig,
   DbConfig,
   DbSeedConfig,
   LoggingConfig,
+  ModulesConfig,
   RedisConfig,
   SendgridConfig,
 } from './config.interface'
@@ -43,6 +45,38 @@ const parseEnv = <T extends Record<string, RuntypeBase>>(fields: T) => {
 
 @singleton()
 export class EnvConfigProvider implements ConfigProvider {
+  private modules?: ModulesConfig
+
+  getModulesConfig() {
+    if (!this.modules) {
+      const env = parseEnv({
+        MODULES_DIRECTORY: r.String.optional(),
+      })
+
+      this.modules = {
+        modulesDirectory: env.MODULES_DIRECTORY ?? '/usr/src/app/modules',
+      }
+    }
+
+    return this.modules
+  }
+
+  private coreModule?: CoreModuleConfig
+
+  getCoreModuleConfig() {
+    if (!this.coreModule) {
+      const env = parseEnv({
+        EMBEDDED_CORE_MODULE_TOKEN: r.String.optional(),
+      })
+
+      this.coreModule = {
+        embeddedCoreModuleToken: env.EMBEDDED_CORE_MODULE_TOKEN,
+      }
+    }
+
+    return this.coreModule
+  }
+
   private api?: ApiConfig
 
   getApiConfig() {
@@ -56,7 +90,7 @@ export class EnvConfigProvider implements ConfigProvider {
       this.api = {
         port: parseInt(env.API_PORT, 10),
         hostId: env.APP_HOST_ID,
-        disable_http: env.DISABLE_HTTP === '1' || env.DISABLE_HTTP === 'true',
+        disableHttp: env.DISABLE_HTTP === '1' || env.DISABLE_HTTP === 'true',
       }
     }
 

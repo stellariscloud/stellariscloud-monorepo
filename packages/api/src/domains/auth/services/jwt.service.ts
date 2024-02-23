@@ -54,48 +54,6 @@ export class JWTService {
     private readonly ormService: OrmService,
   ) {}
 
-  createWorkerSocketAccessToken(workerKeyId: string): string {
-    const { jwtSecret } = this.config.getAuthConfig()
-    const { hostId } = this.config.getApiConfig()
-
-    const payload: AccessTokenJWT = {
-      aud: hostId,
-      jti: `${workerKeyId}:${uuidV4()}`,
-      scp: ['socket_connect'],
-      sub: `WORKER:${workerKeyId}`,
-    }
-
-    const token = jwt.sign(payload, jwtSecret, {
-      algorithm: ALGORITHM,
-      expiresIn: 60, // socket init tokens only need to be valid for a very short time
-    })
-
-    AccessTokenJWT.parse(this.verifyJWT(token))
-
-    return token
-  }
-
-  createFolderSocketAccessToken(userId: string, folderId: string): string {
-    const { jwtSecret } = this.config.getAuthConfig()
-    const { hostId } = this.config.getApiConfig()
-
-    const payload: AccessTokenJWT = {
-      aud: hostId,
-      jti: `${userId}:${uuidV4()}`,
-      scp: [`socket_connect:${folderId}`],
-      sub: `USER:${userId}`,
-    }
-
-    const token = jwt.sign(payload, jwtSecret, {
-      algorithm: ALGORITHM,
-      expiresIn: 60, // socket init tokens only need to be valid for a very short time
-    })
-
-    AccessTokenJWT.parse(this.verifyJWT(token))
-
-    return token
-  }
-
   async createSessionAccessToken(session: Session): Promise<string> {
     const { jwtSecret } = this.config.getAuthConfig()
     const { hostId } = this.config.getApiConfig()
@@ -125,27 +83,6 @@ export class JWTService {
     return token
   }
 
-  createWorkerAccessToken(workerKeyId: string): string {
-    const { jwtSecret } = this.config.getAuthConfig()
-    const { hostId } = this.config.getApiConfig()
-
-    const payload: AccessTokenJWT = {
-      aud: hostId,
-      jti: `${workerKeyId}:${uuidV4()}`,
-      scp: ['perform_work'],
-      sub: `WORKER:${workerKeyId}`,
-    }
-
-    const token = jwt.sign(payload, jwtSecret, {
-      algorithm: ALGORITHM,
-      expiresIn: AuthDurationSeconds.WorkerAccessToken,
-    })
-
-    AccessTokenJWT.parse(this.verifyJWT(token))
-
-    return token
-  }
-
   verifyJWT(token: string) {
     const { jwtSecret } = this.config.getAuthConfig()
     const { hostId } = this.config.getApiConfig()
@@ -155,6 +92,40 @@ export class JWTService {
         algorithms: [ALGORITHM],
         audience: hostId,
       }) as JwtPayload
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AuthTokenExpiredError(token, error)
+      }
+      if (error instanceof jwt.JsonWebTokenError) {
+        throw new AuthTokenInvalidError(token, error)
+      }
+      throw error
+    }
+  }
+
+  verifyModuleJWT(moduleIdentifier: string, publicKey: string, token: string) {
+    try {
+      return jwt.verify(token, publicKey, {
+        algorithms: ['RS512'],
+        subject: `MODULE:${moduleIdentifier}`,
+      }) as JwtPayload
+    } catch (error) {
+      if (error instanceof jwt.TokenExpiredError) {
+        throw new AuthTokenExpiredError(token, error)
+      }
+      if (error instanceof jwt.JsonWebTokenError) {
+        console.log('error:', error)
+        throw new AuthTokenInvalidError(token, error)
+      }
+      throw error
+    }
+  }
+
+  decodeModuleJWT(token: string) {
+    try {
+      return jwt.decode(token, {
+        complete: true,
+      })
     } catch (error) {
       if (error instanceof jwt.TokenExpiredError) {
         throw new AuthTokenExpiredError(token, error)

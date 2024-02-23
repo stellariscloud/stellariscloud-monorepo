@@ -1,9 +1,11 @@
 import { RewriteFrames } from '@sentry/integrations'
 import * as Sentry from '@sentry/node'
 import * as Tracing from '@sentry/tracing'
+import * as _coreWorker from '@stellariscloud/core-worker'
 import type Ajv from 'ajv'
 import formatsPlugin from 'ajv-formats'
 import cors from 'cors'
+import type { NextFunction, Request, Response } from 'express'
 import express from 'express'
 import type { OpenApiDocument } from 'express-openapi-validate'
 import { OpenApiValidator } from 'express-openapi-validate'
@@ -12,14 +14,15 @@ import type http from 'http'
 import type { LoggerModule } from 'i18next'
 import i18next from 'i18next'
 import I18NextFsBackend from 'i18next-fs-backend'
-import type { AddressInfo } from 'net'
+import mime from 'mime'
+import * as redis from 'redis'
 import { singleton } from 'tsyringe'
 
 import { EnvConfigProvider } from './config/env-config.provider'
 import { QueueName } from './constants/app-worker-constants'
-import { IndexAllUnindexedInFolderProcessor } from './domains/folder/workers/index-all-unindexed-in-folder.worker'
+import { NotifyPendingEventsProcessor } from './domains/event/workers/notify-pending-events.worker'
 import { IndexFolderProcessor } from './domains/folder/workers/index-folder.worker'
-import { ExecuteUnstartedWorkProcessor } from './domains/folder-operation/workers/execute-unstarted-work.worker'
+import { ModuleService } from './domains/module/services/module.service'
 import { RouteNotFoundError } from './errors/app.error'
 import { RegisterRoutes } from './generated/routes'
 import { HealthManager } from './health/health-manager'
@@ -27,8 +30,10 @@ import { httpErrorMiddleware } from './middleware/http-error.middleware'
 import { unhandledErrorMiddleware } from './middleware/unhandled-error.middleware'
 import { validationErrorMiddleware } from './middleware/validation-error.middleware'
 import { OrmService } from './orm/orm.service'
+import { CoreModuleService } from './services/core-module.service'
 import { LoggingService } from './services/logging.service'
 import { QueueService } from './services/queue.service'
+import { RedisService } from './services/redis.service'
 import { SocketService } from './services/socket.service'
 import { stringifyLog } from './util/i18n.util'
 import { registerExitHandler, runExitHandlers } from './util/process.util'
@@ -76,11 +81,14 @@ export class App {
 
   constructor(
     private readonly config: EnvConfigProvider,
+    private readonly redisService: RedisService,
     private readonly ormService: OrmService,
     private readonly loggingService: LoggingService,
     private readonly healthManager: HealthManager,
     private readonly socketService: SocketService,
     private readonly queueService: QueueService,
+    private readonly coreModuleService: CoreModuleService,
+    private readonly moduleService: ModuleService,
   ) {
     this.app = express()
     this.app.disable('x-powered-by')
@@ -134,11 +142,18 @@ export class App {
     await this.initI18n()
     await this.initOrm()
     this.initWorkers()
-    await this.initRoutes()
-    if (!this.config.getApiConfig().disable_http) {
-      await this.listen()
+
+    // load any modules from disk
+    await this.loadModulesFromDisk()
+
+    await this.initUIServer()
+    await this.initApiRoutes()
+
+    if (!this.config.getApiConfig().disableHttp) {
+      this.listen()
       this.initSocketServer()
     }
+    this.initCoreModule()
   }
 
   private async initI18n() {
@@ -169,13 +184,16 @@ export class App {
     await this.ormService.init(true)
   }
 
-  private async initRoutes() {
+  private async loadModulesFromDisk() {
+    await this.moduleService.updateModulesFromDisk(
+      this.config.getModulesConfig().modulesDirectory,
+    )
+  }
+
+  private async initApiRoutes() {
     const apiSpec = (await import('./generated/openapi.json'))
       .default as unknown as OpenApiDocument
 
-    // TODO: Update terraform config to use /health instead of /api/health once
-    // the risk of reporting unwanted unhealthy state is ruled out.
-    this.app.get('/health', this.healthManager.requestHandler())
     this.app.get('/api/health', (req, res) => res.sendStatus(200))
 
     this.app.use(Sentry.Handlers.requestHandler())
@@ -234,11 +252,69 @@ export class App {
     this.app.use(unhandledErrorMiddleware(this.loggingService))
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
+  private async initUIServer() {
+    this.app.use((req: Request, res: Response, next: NextFunction) => {
+      if (!req.headers.host) {
+        next()
+        return
+      }
+      const host =
+        'x-forwarded-host' in req.headers
+          ? (req.headers['x-forwarded-host'] as string | undefined) ?? ''
+          : req.headers.host.split(':')[0]
+      const hostnameParts = host.split('.')
+      const isModuleUIHost =
+        hostnameParts.length === 5 && hostnameParts[2] === 'modules'
+      const moduleName: string | undefined = isModuleUIHost
+        ? hostnameParts[1]
+        : undefined
+      const uiName: string | undefined = isModuleUIHost
+        ? hostnameParts[0]
+        : undefined
+      const resolvedContentPath = req.path === '/' ? '/index.html' : req.path
+      if (!moduleName || !uiName) {
+        next()
+        return
+      }
+
+      const REDIS_KEY = `MODULE_UI:${moduleName}:${uiName}:${resolvedContentPath}`
+      const mimeType = mime.getType(resolvedContentPath) ?? 'text/html'
+      void this.redisService.client
+        .GET(redis.commandOptions({ returnBuffers: true }), REDIS_KEY)
+        .then((returnContent) => {
+          if (returnContent) {
+            console.log(
+              '"%s" got response [%s] %d bytes',
+              resolvedContentPath,
+              mimeType,
+              returnContent.length,
+            )
+            return res
+              .setHeader('content-type', mimeType)
+              .setHeader('Cross-Origin-Embedder-Policy', 'cross-origin')
+              .send(returnContent)
+              .status(200)
+          } else {
+            return res
+              .setHeader('Cross-Origin-Embedder-Policy', 'cross-origin')
+              .sendStatus(404)
+          }
+        })
+    })
+  }
+
   private initSocketServer() {
     if (!this.server) {
       throw new Error('HTTP Server should be initialised before socket server.')
     }
     this.socketService.init(this.server)
+  }
+
+  private initCoreModule() {
+    this.coreModuleService.startCoreModuleThread(
+      'embedded_core_module_worker__1',
+    )
   }
 
   private initWorkers() {
@@ -248,39 +324,41 @@ export class App {
         IndexFolderProcessor,
       ),
       this.queueService.bindQueueProcessor(
-        QueueName.ExecuteUnstartedWork,
-        ExecuteUnstartedWorkProcessor,
-      ),
-      this.queueService.bindQueueProcessor(
-        QueueName.IndexAllUnindexedInFolder,
-        IndexAllUnindexedInFolderProcessor,
+        QueueName.NotifyPendingEvents,
+        NotifyPendingEventsProcessor,
       ),
     ]
+
+    // naive repeating job to get event handling going
+    void this.queueService.queues[QueueName.NotifyPendingEvents].add(
+      QueueName.NotifyPendingEvents,
+      undefined,
+      {
+        repeat: {
+          every: 5000,
+        },
+      },
+    )
     registerExitHandler(async () => {
       await Promise.all(processors.map((p) => p.close()))
     })
   }
 
-  async listen() {
+  listen() {
     if (this.closing) {
       return
     }
 
-    const { port } = this.config.getApiConfig()
+    const { port, hostId } = this.config.getApiConfig()
 
     const { logger } = this.loggingService
 
-    return new Promise<void>((resolve) => {
-      const server = this.app.listen(port, () => {
-        const address = server.address() as AddressInfo
-        logger.info(`👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍`)
-        logger.info(`API:  http://<whatever>:${address.port}/api/v1`)
-        logger.info(`Docs: http://<whatever>:${address.port}/docs`)
-        logger.info(`Websocket: http://<whatever>:${address.port}`)
-
-        resolve()
-        this.server = server
-      })
+    this.server = this.app.listen(port, () => {
+      logger.info(`API 👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍👍`)
+      logger.info(`HTTP base:  ${hostId}:${port}/api/v1`)
+      logger.info(`Websocket: ${hostId}:${port}`)
+      logger.info(`Docs: ${hostId}:${port}/docs`)
+      logger.info(`http://<uiName>.<module>.modules.stellariscloud.localhost`)
     })
   }
 

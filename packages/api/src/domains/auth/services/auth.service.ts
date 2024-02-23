@@ -1,12 +1,12 @@
+import type { ModuleConfig } from '@stellariscloud/types'
 import { addMs, earliest } from '@stellariscloud/utils'
 import { eq } from 'drizzle-orm'
-import { container, Lifecycle, scoped } from 'tsyringe'
+import { container, singleton } from 'tsyringe'
 import { v4 as uuidV4 } from 'uuid'
 
 import type { SignupParams } from '../../../controllers/auth.controller'
 import { OrmService } from '../../../orm/orm.service'
-import type { FolderWorkerKey } from '../../folder-operation/entities/folder-worker-key.entity'
-import { folderWorkerKeysTable } from '../../folder-operation/entities/folder-worker-key.entity'
+import { ModuleService } from '../../module/services/module.service'
 import type { NewUser, User } from '../../user/entities/user.entity'
 import { usersTable } from '../../user/entities/user.entity'
 import { UserIdentityConflictError } from '../../user/errors/user.error'
@@ -28,9 +28,12 @@ export const sessionExpiresAt = (createdAt: Date) =>
     addMs(createdAt, AuthDurationMs.SessionAbsolute),
   )
 
-@scoped(Lifecycle.ContainerScoped)
+@singleton()
 export class AuthService {
-  constructor(private readonly jwtService: JWTService) {}
+  constructor(
+    private readonly jwtService: JWTService,
+    private readonly moduleService: ModuleService,
+  ) {}
   ormService = container.resolve(OrmService)
   sessionService = container.resolve(SessionService)
   async signup(data: SignupParams) {
@@ -87,31 +90,30 @@ export class AuthService {
     return createdUser
   }
 
-  async verifyWorkerWithAccessToken(
+  async verifyModuleWithToken(
+    moduleId: string,
     tokenString: string,
-  ): Promise<{ worker?: FolderWorkerKey }> {
-    const parsed = this.jwtService.verifyJWT(tokenString)
-    if (!parsed.sub?.startsWith('WORKER')) {
-      throw new AccessTokenInvalidError()
-    }
-    const workerKeyId = parsed.sub.split(':')[1]
-    const workerKey = workerKeyId
-      ? await this.ormService.db.query.folderWorkerKeysTable.findFirst({
-          where: eq(folderWorkerKeysTable.id, workerKeyId),
-        })
-      : undefined
-    const user =
-      workerKey?.ownerId &&
-      (await this.ormService.db.query.usersTable.findFirst({
-        where: eq(usersTable.id, workerKey.ownerId),
-      }))
+  ): Promise<{ module?: ModuleConfig }> {
+    const module: ModuleConfig | undefined = await this.moduleService.getModule(
+      moduleId,
+    )
 
-    if (!workerKey) {
+    if (!module) {
       throw new AccessTokenInvalidError()
     }
+
+    const parsed = this.jwtService.verifyModuleJWT(
+      moduleId,
+      module.publicKey,
+      tokenString,
+    )
+
+    if (!parsed.sub?.startsWith('MODULE')) {
+      throw new AccessTokenInvalidError()
+    }
+
     return Promise.resolve({
-      user,
-      worker: workerKey,
+      module,
     })
   }
 

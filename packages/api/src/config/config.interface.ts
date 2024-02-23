@@ -3,11 +3,19 @@ import type { LogLevel } from '../constants/logging.constants'
 export interface ApiConfig {
   port: number
   hostId: string
-  disable_http: boolean
+  disableHttp: boolean
+}
+
+export interface CoreModuleConfig {
+  embeddedCoreModuleToken?: string
 }
 
 export interface AuthConfig {
   jwtSecret: string
+}
+
+export interface ModulesConfig {
+  modulesDirectory: string
 }
 
 export interface LoggingConfig {
@@ -47,6 +55,8 @@ export interface ConfigProvider {
   getDbConfig: () => DbConfig
   getDbSeedConfig: () => DbSeedConfig
   getLoggingConfig: () => LoggingConfig
+  getModulesConfig: () => ModulesConfig
   getSendgridConfig: () => SendgridConfig
   getRedisConfig: () => RedisConfig
+  getCoreModuleConfig: () => CoreModuleConfig
 }
