@@ -19,7 +19,6 @@ interface DataTableToolbarProps {
   filters: Record<string, string[]>
   filterOptions?: Record<string, ColumnFilterOptions>
   enableSearch?: boolean
-  searchColumn?: string
   searchPlaceholder?: string
   actionComponent?: React.ReactNode
   onFiltersChange?: (filters: Record<string, string[]>) => void
@@ -29,7 +28,6 @@ export function DataTableToolbar({
   title,
   filterOptions,
   enableSearch = false,
-  searchColumn,
   searchPlaceholder,
   actionComponent,
   filters,
@@ -38,17 +36,9 @@ export function DataTableToolbar({
   const isFiltered =
     Object.keys(filters).filter((key) => filters[key].length).length > 0
 
-  if (enableSearch && !searchColumn) {
-    throw new Error('Must set `searchColumn` if `enableSearch` is true.')
-  }
-
   const _searchFilterValue = React.useMemo<string | undefined>(() => {
-    return searchColumn &&
-      searchColumn in filters &&
-      filters[searchColumn].length
-      ? filters[searchColumn][0]
-      : ''
-  }, [filters, searchColumn])
+    return 'search' in filters && filters.search.length ? filters.search[0] : ''
+  }, [filters])
 
   const [searchFilterValue, setSearchFilterValue] = useState(_searchFilterValue)
 
@@ -68,7 +58,7 @@ export function DataTableToolbar({
           <div className="flex items-center pl-2">
             <Filter className="size-5 text-foreground/40" />
           </div>
-          {enableSearch && searchColumn && (
+          {enableSearch && (
             <div className="bg-card">
               <Input
                 placeholder={searchPlaceholder ?? 'Search...'}
@@ -76,7 +66,7 @@ export function DataTableToolbar({
                 onChange={(event) =>
                   onFiltersChange?.({
                     ...filters,
-                    [searchColumn]: [event.target.value],
+                    search: [event.target.value],
                   })
                 }
                 className="h-8 w-[150px] lg:w-[250px]"

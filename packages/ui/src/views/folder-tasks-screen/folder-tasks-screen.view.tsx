@@ -11,6 +11,7 @@ import {
 import type { PaginationState, SortingState } from '@tanstack/react-table'
 import { CircleCheck, CircleX, Clock10Icon, Play } from 'lucide-react'
 import React from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { useFolderContext } from '@/src/pages/folders/folder.context'
 import { $api } from '@/src/services/api'
@@ -32,12 +33,29 @@ const FILTER_OPTIONS = {
 export function FolderTasksScreen() {
   const { folderId, folder } = useFolderContext()
 
-  const [filters, setFilters] = React.useState<Record<string, string[]>>({})
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const tempHandleNewFilters = (newFilters: Record<string, string[]>) => {
-    console.log('new filters', newFilters)
-    setFilters(newFilters)
-  }
+  const [filters, setFilters] = React.useState<Record<string, string[]>>({
+    search: searchParams.get('search')?.split(',') ?? [],
+    status: searchParams.get('status')?.split(',') ?? [],
+  })
+
+  const handleFiltersChange = React.useCallback(
+    (newFilters: Record<string, string[]>) => {
+      console.log('newFilters', newFilters)
+      setFilters(newFilters)
+      const newSearchParams = {
+        ...searchParams,
+        ...('search' in newFilters ? { search: newFilters.search[0] } : {}),
+        ...('status' in newFilters && newFilters.status.length > 0
+          ? { status: newFilters.status[0] }
+          : {}),
+      }
+      console.log('newSearchParams', newSearchParams)
+      setSearchParams(newSearchParams)
+    },
+    [setSearchParams, searchParams],
+  )
 
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [pagination, setPagination] = React.useState<PaginationState>({
@@ -62,7 +80,9 @@ export function FolderTasksScreen() {
             ? (`${sorting[0].id}-${sorting[0].desc ? 'desc' : 'asc'}` as ServerTasksApiListTasksRequest['sort'])
             : undefined,
           search:
-            searchFilterValue === 'string' ? searchFilterValue : undefined,
+            typeof searchFilterValue === 'string'
+              ? searchFilterValue
+              : undefined,
           includeComplete: statusFilterValue.includes('COMPLETE')
             ? 'true'
             : undefined,
@@ -84,7 +104,7 @@ export function FolderTasksScreen() {
   return (
     <div className={cn('flex h-full flex-1 flex-col items-center')}>
       <div className="container flex flex-1 flex-col">
-        <Card className="border-0 bg-transparent">
+        <Card className="border-0 bg-transparent shadow-none">
           <CardHeader className="p-0 pb-4">
             <CardTitle>Folder Tasks</CardTitle>
             <CardDescription>Folder: {folder?.name}</CardDescription>
@@ -92,9 +112,8 @@ export function FolderTasksScreen() {
           <CardContent className="p-0">
             <DataTable
               enableSearch={true}
-              searchColumn={'taskKey'}
               filters={filters}
-              onColumnFiltersChange={tempHandleNewFilters}
+              onColumnFiltersChange={handleFiltersChange}
               rowCount={listFolderTasksQuery.data?.meta.totalCount}
               data={listFolderTasksQuery.data?.result ?? []}
               columns={folderTasksTableColumns}

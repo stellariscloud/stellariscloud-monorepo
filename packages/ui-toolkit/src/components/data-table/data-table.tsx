@@ -38,7 +38,6 @@ interface DataTableProps<TData, TValue> {
   filterOptions?: Record<string, ColumnFilterOptions>
   enableRowSelection?: boolean
   enableSearch?: boolean
-  searchColumn?: string
   searchPlaceholder?: string
   actionComponent?: React.ReactNode
   cellPadding?: string
@@ -66,7 +65,6 @@ export function DataTable<TData, TValue>({
   onPaginationChange,
   enableRowSelection = false,
   enableSearch = false,
-  searchColumn,
   hideHeader = false,
   pageIndex = 0,
   searchPlaceholder,
@@ -120,9 +118,6 @@ export function DataTable<TData, TValue>({
     getSortedRowModel: getSortedRowModel(),
   })
 
-  if (enableSearch && !searchColumn) {
-    throw new Error('Must set `searchColumn` if `enableSearch` is true.')
-  }
   return (
     <div className={cn('size-full gap-2 flex flex-col')}>
       {(Object.keys(filterOptions).length > 0 ||
@@ -132,7 +127,6 @@ export function DataTable<TData, TValue>({
           title={title}
           actionComponent={actionComponent}
           enableSearch={enableSearch}
-          searchColumn={searchColumn}
           searchPlaceholder={searchPlaceholder}
           filterOptions={filterOptions}
           filters={filters}
