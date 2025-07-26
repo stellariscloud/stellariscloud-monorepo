@@ -60,16 +60,14 @@ export const FolderDetailScreen = () => {
   )
 
   const params = useParams()
+  const searchKey = 'main'
   const [folderId, focusedObjectKeyFromParams] = params['*']?.split('/') ?? []
   // const [queryParams] = useSearchParams()
-  const [filters, setFilters] = React.useState<
-    { id: string; value: unknown }[]
-  >(
-    searchParams.get('search')
-      ? [{ id: 'search', value: searchParams.get('search') }]
-      : [],
-  )
-  const searchFilter = filters.find((f) => f.id === 'main')
+  const [filters, setFilters] = React.useState<Record<string, string[]>>()
+  // searchParams.get('search')
+  //   ? [{ id: 'search', value: searchParams.get('search') }]
+  //   : [],
+  // const searchFilter = filters.find((f) => f.id === searchKey)
   const [sidebarOpen, _setSidebarOpen] = React.useState(true)
   const { uploadFile, uploadingProgress } = useLocalFileCacheContext()
 
@@ -128,9 +126,9 @@ export const FolderDetailScreen = () => {
         query: {
           limit: pagination.pageSize,
           offset: pagination.pageIndex * pagination.pageSize,
-          ...(searchFilter?.value
-            ? { search: searchFilter.value as string }
-            : {}),
+          // ...(searchFilter?.value
+          //   ? { search: searchFilter.value as string }
+          //   : {}),
           sort: sorting[0]
             ? (`${sorting[0].id}-${sorting[0].desc ? 'desc' : 'asc'}` as ListFolderObjectsSortRequest['sort'])
             : undefined,
@@ -221,15 +219,14 @@ export const FolderDetailScreen = () => {
   )
 
   const handleFiltersChange = React.useCallback(
-    (newFilters: ColumnFiltersState) => {
+    (newFilters: Record<string, unknown[]>) => {
+      console.log('newFilters', newFilters)
       setFilters(newFilters)
-      setSearchParams({
+      const newSearchParams = {
         ...searchParams,
         ...('search' in newFilters ? { search: newFilters.search } : {}),
-      })
-      const newSearchParams = {}
-
-      // newSearchParams[]
+      }
+      console.log('newSearchParams', newSearchParams)
       setSearchParams(newSearchParams)
     },
     [setSearchParams, searchParams],
@@ -469,8 +466,12 @@ export const FolderDetailScreen = () => {
                       cellPadding={'p-1.5'}
                       hideHeader={true}
                       enableSearch={true}
-                      searchColumn={'main'}
-                      onColumnFiltersChange={handleFiltersChange}
+                      searchColumn={searchKey}
+                      filters={filters}
+                      onColumnFiltersChange={(values) => {
+                        console.log('folder detail screenvalues', values)
+                        handleFiltersChange(values)
+                      }}
                       rowCount={folderContext.folderMetadata?.totalCount ?? 0}
                       data={listFolderObjectsQuery.data?.result ?? []}
                       columns={folderObjectsTableColumns}

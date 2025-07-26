@@ -2,12 +2,10 @@
 
 import { Cross2Icon } from '@radix-ui/react-icons'
 import { Button, Input, TypographyH3 } from '@stellariscloud/ui-toolkit'
-import type { Table } from '@tanstack/react-table'
 import { Filter } from 'lucide-react'
 import React, { useEffect, useState } from 'react'
 
-import { DataTableFacetedFilter } from './data-table-faceted-filter'
-
+import { DataTableFilter } from './data-table-filter'
 export interface ColumnFilterOptions {
   label: string
   options: {
@@ -16,42 +14,47 @@ export interface ColumnFilterOptions {
     icon?: React.ComponentType<{ className?: string }>
   }[]
 }
-interface DataTableToolbarProps<TData> {
+interface DataTableToolbarProps {
   title?: string
-  table: Table<TData>
-  filterOptions: Record<string, ColumnFilterOptions>
+  filters: Record<string, string[]>
+  filterOptions?: Record<string, ColumnFilterOptions>
   enableSearch?: boolean
   searchColumn?: string
   searchPlaceholder?: string
   actionComponent?: React.ReactNode
+  onFiltersChange?: (filters: Record<string, string[]>) => void
 }
 
-export function DataTableToolbar<TData>({
+export function DataTableToolbar({
   title,
-  table,
   filterOptions,
   enableSearch = false,
   searchColumn,
   searchPlaceholder,
   actionComponent,
-}: DataTableToolbarProps<TData>) {
-  const isFiltered = table.getState().columnFilters.length > 0
-
-  const _filterValue = searchColumn
-    ? ((table.getColumn(searchColumn)?.getFilterValue() as
-        | string
-        | undefined) ?? '')
-    : ''
+  filters,
+  onFiltersChange,
+}: DataTableToolbarProps) {
+  const isFiltered =
+    Object.keys(filters).filter((key) => filters[key].length).length > 0
 
   if (enableSearch && !searchColumn) {
     throw new Error('Must set `searchColumn` if `enableSearch` is true.')
   }
 
-  const [filterValue, setFilterValue] = useState(_filterValue)
+  const _searchFilterValue = React.useMemo<string | undefined>(() => {
+    return searchColumn &&
+      searchColumn in filters &&
+      filters[searchColumn].length
+      ? filters[searchColumn][0]
+      : ''
+  }, [filters, searchColumn])
+
+  const [searchFilterValue, setSearchFilterValue] = useState(_searchFilterValue)
 
   useEffect(() => {
-    setFilterValue(_filterValue)
-  }, [_filterValue])
+    setSearchFilterValue(_searchFilterValue)
+  }, [_searchFilterValue])
 
   return (
     <div className="flex flex-row items-start justify-between">
@@ -69,30 +72,37 @@ export function DataTableToolbar<TData>({
             <div className="bg-card">
               <Input
                 placeholder={searchPlaceholder ?? 'Search...'}
-                value={filterValue}
+                value={searchFilterValue}
                 onChange={(event) =>
-                  table
-                    .getColumn(searchColumn)
-                    ?.setFilterValue(event.target.value)
+                  onFiltersChange?.({
+                    ...filters,
+                    [searchColumn]: [event.target.value],
+                  })
                 }
                 className="h-8 w-[150px] lg:w-[250px]"
               />
             </div>
           )}
-          {Object.keys(filterOptions)
-            .filter((filterOption) => table.getColumn(filterOption))
-            .map((filterOption, i) => (
-              <DataTableFacetedFilter
+          {filterOptions &&
+            Object.keys(filterOptions).map((filterOptionKey, i) => (
+              <DataTableFilter
                 key={i}
-                column={table.getColumn(filterOption)}
-                title={filterOptions[filterOption].label}
-                options={filterOptions[filterOption].options}
+                onFilterValuesChange={(values) =>
+                  onFiltersChange?.({
+                    ...filters,
+                    [filterOptionKey]: values,
+                  })
+                }
+                selectedValues={new Set(filters[filterOptionKey] ?? [])}
+                title={filterOptions[filterOptionKey].label}
+                options={filterOptions[filterOptionKey].options}
               />
             ))}
+
           {isFiltered && (
             <Button
               variant="ghost"
-              onClick={() => table.resetColumnFilters()}
+              onClick={() => onFiltersChange?.({})}
               className="h-8 px-2 lg:px-3"
             >
               Reset
